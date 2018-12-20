@@ -1,28 +1,82 @@
 var http = require('http'),
-    httpProxy = require('http-proxy');
-
+    httpProxy = require('http-proxy'),
+    fs = require('fs');
 //
 // Create a proxy server with custom application logic
 //
 var proxy = httpProxy.createProxyServer({});
 
+proxy.on("proxyReq", function(proxyReq, req){
+  reqBody = ''
+
+  req.on("data", function(body){
+    console.log("in req data" + reqBody)
+    reqBody += body
+  })
+
+  req.on("end", function(){
+    if(req.method == 'POST'){
+      console.log("in req end for POST: " + reqBody)
+      req.myBody = reqBody
+    }
+  })
+})
+
 //
 // Listen for the `proxyRes` event on `proxy`.
 //
 proxy.on('proxyRes', function (proxyRes, req, res) {
-    console.log('RAW Response from the target', JSON.stringify(proxyRes.headers, true, 2));
+  var toLog = "",
+      requestBody = "",
+      responseBody = ""
+  toLog += "Request: \n"
+
+  requestToLog = {'method': req.method, 'url':req.url, 'headers':req.headers}
+
+  toLog += JSON.stringify(requestToLog, true, 2) + "\n"
+
+  if(req.myBody){
+    toLog += "Request Body: \n"
+    toLog += req.myBody + "\n"
+  }
+
+
+  toLog += "Response: \n"
+
+  toLog += JSON.stringify(proxyRes.headers, true, 2) + "\n";
     
     //maybe I can intercept it on some response emitted events?
     proxyRes.on('data', function(body){
         try {
-          console.log(body.toString())    
+          //console.log(body.toString())
+          responseBody += body.toString()
         } catch(e){
           //ERROR
         }
       })
 
-  });
+    //at the end, save the log to a file
+    proxyRes.on("end", function(){
+      toLog += "Response Body: \n"
+      toLog += responseBody
 
+      var date = new Date()//, hour = date.getHours(), minutes = date.getMinutes(), seconds = date.getSeconds(), millis = date.getMilliseconds(); 
+      var path = "logs/" + date.toISOString().replace('T', '_').replace(':', '_').replace(':', '_') + ".log"; 
+      fs.writeFile(path, toLog, (err) =>{
+        if (err) {
+          return console.error(err); 
+        }
+      
+        console.log('response saved');
+      })
+    })
+});
+
+
+
+proxy.on('end', function() {
+  console.log('proxied');
+})
 
 //
 // Listen for the `open` event on `proxy`.
@@ -32,25 +86,6 @@ proxy.on('open', function (proxySocket) {
     proxySocket.on('data', function(data){
         console.log('logging data', data)
     });
-  });
-
-
-  proxy.on('proxyResponse', function (req, res, response) {
-
-    res.setHeader('x-new-cust-field', 'mycustomfield');    //Able to add custom headers fields
-    res.setHeader('x-cust-field', 'editedcustomfield');    //This makes no changes in the response header
-  
-    //maybe I can intercept it on some response emitted events?
-    response.on('data', function(body){
-      try {
-  
-        res.getHeader('x-cust-field') //can see all the values written by proxied server 
-        res.setHeader('x-cust-field', 'editedcustomfield');    //Can't set headers after they are sent.
-  
-      } catch(e){
-        //ERROR
-      }
-    })
   });
 
 
@@ -73,6 +108,5 @@ var server = http.createServer(function(req, res) {
   proxy.web(req, res, { target: 'http://127.0.0.1:8088' });
 
 });
-
 console.log("listening on port 9090")
 server.listen(9090);
